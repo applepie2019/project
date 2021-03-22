@@ -29,50 +29,53 @@ void do_work(int num_threads, short *A, short *B, short *C, int num_a,
 
     #pragma omp parallel
     {
-      int t = omp_get_thread_num();
-//    __SSC_MARK(111);
-      for (int i = 0; i < iterations; i++)
-      {
-          if (t==0) SimMarker(1, i);
-          for (int a = 0; a < num_a; a++)
-          {
-              for (int b = 0; b < num_b; b++)
-              {
-		  for (int x = 0; x < x_dim; x++)
-		  {
-                      int z_offset = 0;
-		      for (int z = 0; z < z_dim; z++)
-	              {
-			   __m512i c_data;
-		      	   #pragma unroll(8)
-                           for (int offset = 0; offset < y_dim; offset += 32)
-                           {
-                               __m512i a_data = _mm512_load_epi32(
-                                   &A[a * tile_size + x * y_dim + offset]);
-                               __m512i b_data = _mm512_load_epi32(
-                                   &B[(t * num_b * tile_size) + b * tile_size +
-                                   z * y_dim + offset]);
-                               c_data += _mm512_add_epi16(a_data, b_data);
-                           }
+        int t = omp_get_thread_num();
+#if 0
+        __SSC_MARK(111);
+#endif
+        for (int i = 0; i < iterations; i++)
+        {
+            if (t==0) SimMarker(1, i);
+            for (int a = 0; a < num_a; a++)
+            {
+                for (int b = 0; b < num_b; b++)
+                {
+		    for (int x = 0; x < x_dim; x++)
+		    {
+                        int z_offset = 0;
+		        for (int z = 0; z < z_dim; z++)
+	                {
+			    __m512i c_data;
+		      	    #pragma unroll(8)
+                            for (int offset = 0; offset < y_dim; offset += 32)
+                            {
+                                __m512i a_data = _mm512_load_epi32(
+                                    &A[a * tile_size + x * y_dim + offset]);
+                                __m512i b_data = _mm512_load_epi32(
+                                    &B[(t * num_b * tile_size) + b * tile_size +
+                                    z * y_dim + offset]);
+                                c_data += _mm512_add_epi16(a_data, b_data);
+                            }
 
-			   if (z_offset < z_dim)
-			   {
-                               _mm512_store_epi32(&C[
-                                   (t * num_a * num_b * c_tile_size) +
-                                   (a * num_b * c_tile_size) + (b * c_tile_size) +
-                                   x * z_dim + z_offset], c_data);
+			    if (z_offset < z_dim)
+			    {
+                                _mm512_store_epi32(&C[
+                                    (t * num_a * num_b * c_tile_size) +
+                                    (a * num_b * c_tile_size) + (b * c_tile_size) +
+                                    x * z_dim + z_offset], c_data);
+			        z_offset += 32;
+                            }
+		        }
+                    }
+                }
+	    }
 
-			       z_offset += 32;
-                           }
-		      }
-                  }
-              }
-	  }
-          if (t==0) SimMarker(2, i);
-      }
-       // SimMarker(2, i);
+            if (t==0) SimMarker(2, i);
+        }
+#if 0
+        __SSC_MARK(222);
+#endif
     }
-  //  __SSC_MARK(222);
 }
 
 void scalar_work(int num_threads, short *A, short *B, short *C, int num_a,
