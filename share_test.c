@@ -9,6 +9,7 @@
 /* Alexander Heinecke (Intel Corp.)
 ******************************************************************************/
 #include <libxsmm.h>
+#include <libxsmm_sync.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -48,6 +49,8 @@ LIBXSMM_INLINE void print_help(void) {
   printf("    NUM_B\n");
   printf("    NUM_ROW_TEAM\n");
   printf("    NUM_COLUMN_TEAM\n");
+  printf("    BLOCKING_SIZE_A\n");
+  printf("    BLOCKING_SIZE_B\n");
   printf("    0: unaligned A, otherwise aligned\n");
   printf("    0: unaligned C, otherwise aligned\n");
   printf("    BRsize: 1 - N\n");
@@ -68,7 +71,9 @@ double run_jit_bfloat16( const gemm_def*         i_gemm_def,
                          const unsigned int      i_print_jit_info,
                          size_t num_threads,
                          size_t _rt,
-                         size_t _ct  ) {
+                         size_t _ct,
+                         size_t block_a,
+                         size_t block_b ) {
   /* define function pointer */
   libxsmm_xmmfunction l_test_jit = { NULL };
   libxsmm_timer_tickint l_start;
@@ -79,7 +84,8 @@ double run_jit_bfloat16( const gemm_def*         i_gemm_def,
   float l_beta = (float)i_gemm_def->beta;
   unsigned long long l_br = (unsigned long long)i_gemm_def->br_count;
   l_flags |= LIBXSMM_GEMM_FLAG_VNNI_A;
-
+  libxsmm_barrier *barrier;
+  barrier = libxsmm_barrier_create(num_threads, 1);
   if (0 == i_gemm_def) {
     fprintf(stderr, "JIT: unsupported descriptor arguments or data type!\n");
     return EXIT_FAILURE;
@@ -153,7 +159,8 @@ double run_jit_bfloat16( const gemm_def*         i_gemm_def,
       cfg_tr.bsmm(NULL, NULL, NULL);
     }
     size_t ltid = omp_get_thread_num();
-    size_t l_chunkSize = num_b * num_threads / num_threads;
+
+    libxsmm_barrier_init(barrier, ltid);
 
     size_t my_col_id = ltid % column_teams; // 0
     size_t my_row_id = ltid / column_teams; //0
@@ -164,14 +171,18 @@ double run_jit_bfloat16( const gemm_def*         i_gemm_def,
     size_t my_in_start = LIBXSMM_MIN( my_col_id * in_tasks_per_thread, n_blocks);
     size_t my_in_end = LIBXSMM_MIN( (my_col_id+1) * in_tasks_per_thread, n_blocks);
 
-
     for (size_t l_t = 0; l_t < g_reps; l_t++) {
       if (ltid == 0) SimMarker(1, l_t);
-      for (size_t i = my_im_start; i < my_im_end; i++){
-	for (size_t j = my_in_start; j < my_in_end; j++){
-	  l_test_jit.bmrs(i_a[i], i_b[j], o_c[i*n_blocks+j], &l_br);
-	}
+      for (size_t i = my_im_start; i < my_im_end; i += block_a){
+        for (size_t j = my_in_start; j < my_in_end; j += block_b){
+          for (size_t m = i; m < (i+block_a); m++){
+            for (size_t n = j; n < (j+block_b); n++){
+              l_test_jit.bmrs(i_a[m], i_b[n], o_c[m*n_blocks+n], &l_br);
+            }
+          }
+        }
       }
+      libxsmm_barrier_wait(barrier, ltid);
       if (ltid == 0) SimMarker(2, l_t);
     }
     if (i_gemm_def->tc_config) {
@@ -238,14 +249,15 @@ int main(int argc, char* argv []) {
   double l_total_max_error = 0.0;
   int l_file_input = 0;
   int l_tc_config = 0;
-
+  size_t l_blocksize_a = 1;
+  size_t l_blocksize_b = 1;
   /* scaling factor */
   float l_scf = 1.0;
 
   libxsmm_matdiff_clear(&l_diff);
 
   /* check argument count for a valid range */
-  if ( argc == 15 ) {
+  if ( argc == 17 ) {
     /* xgemm sizes */
     l_m = atoi(argv[1]);
     l_n = atoi(argv[2]);
@@ -254,37 +266,39 @@ int main(int argc, char* argv []) {
     l_num_b = atoi(argv[5]);
     l_rt = atoi(argv[6]);
     l_ct = atoi(argv[7]);
+    l_blocksize_a = atoi(argv[8]);
+    l_blocksize_b = atoi(argv[9]);
 
     /* some sugar */
-    l_aligned_a = atoi(argv[8]);
-    l_aligned_c = atoi(argv[9]);
+    l_aligned_a = atoi(argv[10]);
+    l_aligned_c = atoi(argv[11]);
 
     /* arch specific stuff */
-    l_br = atoi(argv[10]);
-    l_br_unroll = atoi(argv[11]);
-    g_reps = atoi(argv[12]);
-    l_tc_config = atoi(argv[13]);
+    l_br = atoi(argv[12]);
+    l_br_unroll = atoi(argv[13]);
+    g_reps = atoi(argv[14]);
+    l_tc_config = atoi(argv[15]);
 
     /* set value of prefetch flag */
-    if (strcmp("nopf", argv[14]) == 0) {
+    if (strcmp("nopf", argv[16]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_NONE;
     }
-    else if (strcmp("pfsigonly", argv[14]) == 0) {
+    else if (strcmp("pfsigonly", argv[16]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_SIGONLY;
     }
-    else if (strcmp("BL2viaC", argv[14]) == 0) {
+    else if (strcmp("BL2viaC", argv[16]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_BL2_VIA_C;
     }
-    else if (strcmp("curAL2", argv[14]) == 0) {
+    else if (strcmp("curAL2", argv[16]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2_AHEAD;
     }
-    else if (strcmp("curAL2_BL2viaC", argv[14]) == 0) {
+    else if (strcmp("curAL2_BL2viaC", argv[16]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2BL2_VIA_C_AHEAD;
     }
-    else if (strcmp("AL2", argv[14]) == 0) {
+    else if (strcmp("AL2", argv[16]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2;
     }
-    else if (strcmp("AL2_BL2viaC", argv[14]) == 0) {
+    else if (strcmp("AL2_BL2viaC", argv[16]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2BL2_VIA_C;
     }
     else {
@@ -334,13 +348,26 @@ int main(int argc, char* argv []) {
     exit(EXIT_FAILURE);
   }
 
+  if( l_blocksize_a == 0 || l_blocksize_b == 0){
+    fprintf(stderr, " blockA/blockB can not be 0 \n");
+    exit(EXIT_FAILURE);
+  }
+
   if ( l_num_a % l_rt != 0  ) {
-    fprintf(stderr, " row team has to be the factor of num of A tile \n");
+    fprintf(stderr, " row team has to be a factor of num of A tile \n");
+    exit(EXIT_FAILURE);
+  }
+  else if ( ((l_num_a / l_ct) % l_blocksize_a !=0) ) {
+    fprintf(stderr, " block size of A has to be a factor of num of A tile/core \n");
     exit(EXIT_FAILURE);
   }
 
   if ( l_num_b % l_ct != 0  ) {
-    fprintf(stderr, " column team has to be the factor of num of B tile \n");
+    fprintf(stderr, " column team has to be a factor of num of B tile \n");
+    exit(EXIT_FAILURE);
+  }
+  else if ( ((l_num_b / l_ct) % l_blocksize_b !=0) ) {
+    fprintf(stderr, " block size of B has to be a factor of num of B tile/core \n");
     exit(EXIT_FAILURE);
   }
 
@@ -423,7 +450,7 @@ int main(int argc, char* argv []) {
     }
   }
 
-  l_runtime_libxsmm = run_jit_bfloat16( &l_gemm_def, l_a_bf, l_b_bf, l_c_bf, l_num_a, l_num_b, l_file_input, l_num_threads, l_rt, l_ct);
+  l_runtime_libxsmm = run_jit_bfloat16( &l_gemm_def, l_a_bf, l_b_bf, l_c_bf, l_num_a, l_num_b, l_file_input, l_num_threads, l_rt, l_ct, l_blocksize_a, l_blocksize_b);
 
   printf("%fs for C\n", l_runtime_c);
   printf("%f GFLOPS for C\n", ((double)((double)g_reps * (double)l_m * (double)l_n * (double)l_k * (double)l_br) * 2.0) / (l_runtime_c * 1.0e9));
