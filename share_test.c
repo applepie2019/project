@@ -46,6 +46,8 @@ LIBXSMM_INLINE void print_help(void) {
   printf("    K\n");
   printf("    NUM_A\n");
   printf("    NUM_B\n");
+  printf("    NUM_ROW_TEAM\n");
+  printf("    NUM_COLUMN_TEAM\n");
   printf("    0: unaligned A, otherwise aligned\n");
   printf("    0: unaligned C, otherwise aligned\n");
   printf("    BRsize: 1 - N\n");
@@ -64,7 +66,9 @@ double run_jit_bfloat16( const gemm_def*         i_gemm_def,
                          size_t num_a,
                          size_t num_b,
                          const unsigned int      i_print_jit_info,
-                         size_t num_threads ) {
+                         size_t num_threads,
+                         size_t _rt,
+                         size_t _ct  ) {
   /* define function pointer */
   libxsmm_xmmfunction l_test_jit = { NULL };
   libxsmm_timer_tickint l_start;
@@ -132,28 +136,50 @@ double run_jit_bfloat16( const gemm_def*         i_gemm_def,
 
   /* receive kernel information */
   libxsmm_get_mmkernel_info(l_test_jit, &l_info);
+#if 0
   if (i_gemm_def->tc_config) {
     cfg_tr.bsmm(NULL, NULL, NULL);
   }
+#endif
   l_start = libxsmm_timer_tick();
+  size_t row_teams = _rt;
+  size_t column_teams = _ct;
+  size_t m_blocks = num_a;
+  size_t n_blocks = num_b;
 
   #pragma omp parallel
   {
-    size_t t = omp_get_thread_num();
+    if (i_gemm_def->tc_config) {
+      cfg_tr.bsmm(NULL, NULL, NULL);
+    }
+    size_t ltid = omp_get_thread_num();
+    size_t l_chunkSize = num_b * num_threads / num_threads;
+
+    size_t my_col_id = ltid % column_teams; // 0
+    size_t my_row_id = ltid / column_teams; //0
+    size_t im_tasks_per_thread = (m_blocks + row_teams-1)/row_teams;
+    size_t in_tasks_per_thread = (n_blocks + column_teams-1)/column_teams;
+    size_t my_im_start = LIBXSMM_MIN( my_row_id * im_tasks_per_thread, m_blocks);
+    size_t my_im_end = LIBXSMM_MIN( (my_row_id+1) * im_tasks_per_thread, m_blocks);
+    size_t my_in_start = LIBXSMM_MIN( my_col_id * in_tasks_per_thread, n_blocks);
+    size_t my_in_end = LIBXSMM_MIN( (my_col_id+1) * in_tasks_per_thread, n_blocks);
+
+
     for (size_t l_t = 0; l_t < g_reps; l_t++) {
-      if (t == 0) SimMarker(1, l_t); 
-      for (size_t i = 0; i < num_a; i++){
-	for (size_t j = 0; j < num_b; j++){
-	  l_test_jit.bmrs(i_a[i], i_b[t*num_b+j], o_c[t*num_b*num_a+i*num_b+j], &l_br);
+      if (ltid == 0) SimMarker(1, l_t);
+      for (size_t i = my_im_start; i < my_im_end; i++){
+	for (size_t j = my_in_start; j < my_in_end; j++){
+	  l_test_jit.bmrs(i_a[i], i_b[j], o_c[i*n_blocks+j], &l_br);
 	}
       }
-      if (t == 0) SimMarker(2, l_t);
+      if (ltid == 0) SimMarker(2, l_t);
+    }
+    if (i_gemm_def->tc_config) {
+      rls_tr.bsmm(NULL, NULL, NULL);
     }
   }
   l_runtime = libxsmm_timer_duration(l_start, libxsmm_timer_tick());
-  if (i_gemm_def->tc_config) {
-    rls_tr.bsmm(NULL, NULL, NULL);
-  }
+
   if ( i_print_jit_info == 0 ) {
     printf("function pointer address: %llx\n", (unsigned long long)l_test_jit.xmm);
     printf("%fs for creating jit\n", l_jittime);
@@ -178,6 +204,8 @@ int main(int argc, char* argv []) {
   int l_br_unroll = 0;
   int l_num_a = 1;
   int l_num_b = 1;
+  size_t l_rt = 1;
+  size_t l_ct = 1;
 
   libxsmm_gemm_prefetch_type l_prefetch = LIBXSMM_GEMM_PREFETCH_NONE;
   libxsmm_matdiff_info l_diff;
@@ -217,44 +245,46 @@ int main(int argc, char* argv []) {
   libxsmm_matdiff_clear(&l_diff);
 
   /* check argument count for a valid range */
-  if ( argc == 13 ) {
+  if ( argc == 15 ) {
     /* xgemm sizes */
     l_m = atoi(argv[1]);
     l_n = atoi(argv[2]);
     l_k = atoi(argv[3]);
     l_num_a = atoi(argv[4]);
     l_num_b = atoi(argv[5]);
+    l_rt = atoi(argv[6]);
+    l_ct = atoi(argv[7]);
 
     /* some sugar */
-    l_aligned_a = atoi(argv[6]);
-    l_aligned_c = atoi(argv[7]);
+    l_aligned_a = atoi(argv[8]);
+    l_aligned_c = atoi(argv[9]);
 
     /* arch specific stuff */
-    l_br = atoi(argv[8]);
-    l_br_unroll = atoi(argv[9]);
-    g_reps = atoi(argv[10]);
-    l_tc_config = atoi(argv[11]);
+    l_br = atoi(argv[10]);
+    l_br_unroll = atoi(argv[11]);
+    g_reps = atoi(argv[12]);
+    l_tc_config = atoi(argv[13]);
 
     /* set value of prefetch flag */
-    if (strcmp("nopf", argv[12]) == 0) {
+    if (strcmp("nopf", argv[14]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_NONE;
     }
-    else if (strcmp("pfsigonly", argv[12]) == 0) {
+    else if (strcmp("pfsigonly", argv[14]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_SIGONLY;
     }
-    else if (strcmp("BL2viaC", argv[12]) == 0) {
+    else if (strcmp("BL2viaC", argv[14]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_BL2_VIA_C;
     }
-    else if (strcmp("curAL2", argv[12]) == 0) {
+    else if (strcmp("curAL2", argv[14]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2_AHEAD;
     }
-    else if (strcmp("curAL2_BL2viaC", argv[12]) == 0) {
+    else if (strcmp("curAL2_BL2viaC", argv[14]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2BL2_VIA_C_AHEAD;
     }
-    else if (strcmp("AL2", argv[12]) == 0) {
+    else if (strcmp("AL2", argv[14]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2;
     }
-    else if (strcmp("AL2_BL2viaC", argv[12]) == 0) {
+    else if (strcmp("AL2_BL2viaC", argv[14]) == 0) {
       l_prefetch = LIBXSMM_GEMM_PREFETCH_AL2BL2_VIA_C;
     }
     else {
@@ -304,6 +334,16 @@ int main(int argc, char* argv []) {
     exit(EXIT_FAILURE);
   }
 
+  if ( l_num_a % l_rt != 0  ) {
+    fprintf(stderr, " row team has to be the factor of num of A tile \n");
+    exit(EXIT_FAILURE);
+  }
+
+  if ( l_num_b % l_ct != 0  ) {
+    fprintf(stderr, " column team has to be the factor of num of B tile \n");
+    exit(EXIT_FAILURE);
+  }
+
   if ( l_trans_b == 0 ) {
     printf("------------------------------------------------\n");
     printf("RUNNING (%ix%i) X (%ix%i) = (%ix%i), %s, BR=%i\n", l_m, l_k, l_k, l_n, l_m, l_n, l_precision, l_br);
@@ -338,8 +378,8 @@ int main(int argc, char* argv []) {
 
 
   l_a_bf = (libxsmm_bfloat16**)libxsmm_aligned_malloc((size_t)l_num_a * sizeof(libxsmm_bfloat16*), 64);
-  l_b_bf = (libxsmm_bfloat16**)libxsmm_aligned_malloc((size_t)l_num_threads * (size_t)l_num_b * sizeof(libxsmm_bfloat16*), 64);
-  l_c_bf = (libxsmm_bfloat16**)libxsmm_aligned_malloc((size_t)l_num_threads * (size_t)l_num_a * (size_t)l_num_b * sizeof(libxsmm_bfloat16*), 64);
+  l_b_bf = (libxsmm_bfloat16**)libxsmm_aligned_malloc((size_t)l_num_b * sizeof(libxsmm_bfloat16*), 64);
+  l_c_bf = (libxsmm_bfloat16**)libxsmm_aligned_malloc((size_t)l_num_a * (size_t)l_num_b * sizeof(libxsmm_bfloat16*), 64);
 
   for ( int i = 0; i < l_num_a; i++)
     l_a_bf[i] = (libxsmm_bfloat16*)libxsmm_aligned_malloc((size_t)l_lda * (size_t)l_k * (size_t)l_br * sizeof(libxsmm_bfloat16), 64);
@@ -361,8 +401,7 @@ int main(int argc, char* argv []) {
     }
   }
   /* touch B */
-  #pragma omp parallel for
-  for (int i = 0; i < l_num_threads * l_num_b; i++) {
+  for (int i = 0; i < l_num_b; i++) {
     for (int l_r = 0; l_r < l_br; l_r++) {
       for (int l_i = 0; l_i < l_ldb; l_i++) {
         for (int l_j = 0; l_j < l_n; l_j++) {
@@ -374,8 +413,7 @@ int main(int argc, char* argv []) {
     }
   }
    /* touch C */
-  #pragma omp parallel for
-  for (int i = 0; i < l_num_threads * l_num_a * l_num_b; i++) {
+  for (int i = 0; i < l_num_a * l_num_b; i++) {
     for (int l_i = 0; l_i < l_ldc; l_i++) {
       for (int l_j = 0; l_j < l_n; l_j++) {
         union libxsmm_bfloat16_hp tmp;
@@ -385,7 +423,7 @@ int main(int argc, char* argv []) {
     }
   }
 
-  l_runtime_libxsmm = run_jit_bfloat16( &l_gemm_def, l_a_bf, l_b_bf, l_c_bf, l_num_a, l_num_b, l_file_input, l_num_threads);
+  l_runtime_libxsmm = run_jit_bfloat16( &l_gemm_def, l_a_bf, l_b_bf, l_c_bf, l_num_a, l_num_b, l_file_input, l_num_threads, l_rt, l_ct);
 
   printf("%fs for C\n", l_runtime_c);
   printf("%f GFLOPS for C\n", ((double)((double)g_reps * (double)l_m * (double)l_n * (double)l_k * (double)l_br) * 2.0) / (l_runtime_c * 1.0e9));
