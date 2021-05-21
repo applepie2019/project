@@ -372,16 +372,19 @@ int main(int argc, char * argv[]) {
   {
 #if defined(_OPENMP)
     const int tid = omp_get_thread_num();
+    const int num_threads = omp_get_num_threads();
 #else
     const int tid = 0;
+    const int num_threads = 1;
 #endif
 
     for(int i = 0; i < iters; i++) {
 #ifdef USE_SNIPER
-      if ( tid == 0 ) { SimMarker(1, i); }
+      if ( tid == 0 ) {
+        SimMarker(1, i); }
 #endif
       for(int s = 0; s < LS; s++) {
-        eb[s]->forward(N, eio[i][s]->NS, eio[i][s]->offsets, eio[i][s]->indices, eio[i][s]->output);
+        eb[s]->forward(N, eio[i][s]->NS, eio[i][s]->offsets, eio[i][s]->indices, eio[i][s]->output, tid, num_threads);
       }
 #ifdef USE_SNIPER
       if ( tid == 0 ) { SimMarker(2, i); }
@@ -390,7 +393,6 @@ int main(int argc, char * argv[]) {
   }
     t1 = get_time();
   }
-
 
     t2 = get_time();
   for(int i = 0; i < iters; i++) {
@@ -419,8 +421,10 @@ int main(int argc, char * argv[]) {
   {
 #if defined(_OPENMP)
     const int tid = omp_get_thread_num();
+    const int num_threads = omp_get_num_threads();
 #else
     const int tid = 0;
+    const int num_threads = 1;
 #endif
 
     for(int i = 0; i < iters; i++) {
@@ -429,7 +433,7 @@ int main(int argc, char * argv[]) {
       if ( tid == 0 ) { SimMarker(1, i); }
 #endif
       for(int s = LS-1; s >= 0; s--) {
-        eb[s]->backward(N, eio[i][s]->NS, eio[i][s]->gradout, eio[i][s]->offsets, eio[i][s]->indices, eio[i][s]->grads);
+        eb[s]->backward(N, eio[i][s]->NS, eio[i][s]->gradout, eio[i][s]->offsets, eio[i][s]->indices, eio[i][s]->grads, tid, num_threads);
       }
 #ifdef USE_SNIPER
       if ( tid == 0 ) { SimMarker(2, i); }
@@ -447,8 +451,10 @@ int main(int argc, char * argv[]) {
   {
 #if defined(_OPENMP)
     const int tid = omp_get_thread_num();
+    const int num_threads = omp_get_num_threads();
 #else
     const int tid = 0;
+    const int num_threads = 1;
 #endif
 
     for(int i = 0; i < iters; i++) {
@@ -457,7 +463,7 @@ int main(int argc, char * argv[]) {
       if ( tid == 0 ) { SimMarker(1, i); }
 #endif
       for(int s = 0; s < LS; s++) {
-        eb[s]->update(eio[i][s]->NS, eio[i][s]->grads, eio[i][s]->indices, -0.1, M, use_rtm);
+        eb[s]->update(eio[i][s]->NS, eio[i][s]->grads, eio[i][s]->indices, -0.1, M, use_rtm, tid, num_threads);
       }
 #ifdef USE_SNIPER
       if ( tid == 0 ) { SimMarker(2, i); }

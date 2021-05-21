@@ -48,18 +48,11 @@ public:
   }
 
 #ifdef USE_LIBXSMM_JIT
-  void forward(int N, int NS, const long *offsets, const long *indices, T *output_)
+  void forward(int N, int NS, const long *offsets, const long *indices, T *output_, size_t l_tid, size_t l_numThreads)
   {
     T(*__restrict weight)[E] = (T(*)[*])weight_;
     T(*__restrict output)[E] = (T(*)[*])output_;
 
-#ifdef _OPENMP
-    size_t l_tid = omp_get_thread_num();
-    size_t l_numThreads = omp_get_num_threads();
-#else
-    size_t l_tid = 0;
-    size_t l_numThreads = 1;
-#endif
     size_t low = N * l_tid / l_numThreads;
     size_t high = N * (l_tid + 1) / l_numThreads;
 
@@ -76,20 +69,13 @@ public:
     }
   }
 #else
-  void forward(int N, int NS, const long *offsets, const long *indices, T *output_)
+  void forward(int N, int NS, const long *offsets, const long *indices, T *output_, size_t l_tid, size_t l_numThreads)
   {
 
-    printf("else JIT \n");
+   // printf("else JIT \n");
     T(*__restrict weight)[E] = (T(*)[*])weight_;
     T(*__restrict output)[E] = (T(*)[*])output_;
 
-#ifdef _OPENMP
-    size_t l_tid = omp_get_thread_num();
-    size_t l_numThreads = omp_get_num_threads();
-#else
-    size_t l_tid = 0;
-    size_t l_numThreads = 1;
-#endif
     size_t low = N * l_tid / l_numThreads;
     size_t high = N * (l_tid + 1) / l_numThreads;
 
@@ -114,18 +100,11 @@ public:
 #endif
 
 #ifdef USE_LIBXSMM_JIT
-  void backward(int N, int NS, const T *gradout_, const long *offsets, const long *indices, T *values_)
+  void backward(int N, int NS, const T *gradout_, const long *offsets, const long *indices, T *values_, size_t l_tid, size_t l_numThreads)
   {
     T(*__restrict gradout)[E] = (T(*)[*])gradout_;
     T(*__restrict values)[E] = (T(*)[*])values_;
     int _ld = E;
-#ifdef _OPENMP
-    size_t l_tid = omp_get_thread_num();
-    size_t l_numThreads = omp_get_num_threads();
-#else
-    size_t l_tid = 0;
-    size_t l_numThreads = 1;
-#endif
     size_t low = N * l_tid / l_numThreads;
     size_t high = N * (l_tid + 1) / l_numThreads;
 
@@ -144,17 +123,10 @@ public:
     }
   }
 #else
-  void backward(int N, int NS, const T *gradout_, const long *offsets, const long *indices, T *values_)
+  void backward(int N, int NS, const T *gradout_, const long *offsets, const long *indices, T *values_, size_t l_tid, size_t l_numThreads)
   {
     T(*__restrict gradout)[E] = (T(*)[*])gradout_;
     T(*__restrict values)[E] = (T(*)[*])values_;
-#ifdef _OPENMP
-    size_t l_tid = omp_get_thread_num();
-    size_t l_numThreads = omp_get_num_threads();
-#else
-    size_t l_tid = 0;
-    size_t l_numThreads = 1;
-#endif
     size_t low = N * l_tid / l_numThreads;
     size_t high = N * (l_tid + 1) / l_numThreads;
 
@@ -176,7 +148,7 @@ public:
 #endif
 
 #ifdef USE_LIBXSMM_JIT
-  void update(int NS, const T *grads_, const long *indices, float lr, int M, int use_rtm)
+  void update(int NS, const T *grads_, const long *indices, float lr, int M, int use_rtm, size_t l_tid, size_t l_numThreads)
   {
     int use_lock_free = use_rtm == 0 ? 1: 0;
     T(*__restrict weight)[E] = (T(*)[*])weight_;
@@ -206,13 +178,6 @@ public:
     } else {
       SimpleSpinLock fallBackLock;
 
-#ifdef _OPENMP
-      size_t l_tid = omp_get_thread_num();
-      size_t l_numThreads = omp_get_num_threads();
-#else
-      size_t l_tid = 0;
-      size_t l_numThreads = 1;
-#endif
       size_t low = NS * l_tid / l_numThreads;
       size_t high = NS * (l_tid + 1) / l_numThreads;
 
@@ -231,7 +196,7 @@ public:
     }
   }
 #else
-  void update(int NS, const T *grads_, const long *indices, float lr, int M, int use_rtm)
+  void update(int NS, const T *grads_, const long *indices, float lr, int M, int use_rtm, size_t l_tid, size_t l_numThreads)
   {
     T(*__restrict weight)[E] = (T(*)[*])weight_;
     T(*__restrict grads)[E] = (T(*)[*])grads_;
@@ -256,13 +221,6 @@ public:
       }
     } else {
       SimpleSpinLock fallBackLock;
-#ifdef _OPENMP
-      size_t l_tid = omp_get_thread_num();
-      size_t l_numThreads = omp_get_num_threads();
-#else
-      size_t l_tid = 0;
-      size_t l_numThreads = 1;
-#endif
       size_t low = NS * l_tid / l_numThreads;
       size_t high = NS * (l_tid + 1) / l_numThreads;
 
