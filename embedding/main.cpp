@@ -10,6 +10,8 @@
 ******************************************************************************/
 
 #include <vector>
+#include <map>
+#include <set>
 #include <time.h>
 #include <sys/syscall.h>
 #include <algorithm>
@@ -46,13 +48,15 @@ typedef Half DTyp;
 typedef FTyp DTyp;
 #endif
 
+#define debug 1
+
 typedef EmbeddingBagImpl<DTyp> EmbeddingBag;
 
 int my_rank = 0;
 int my_size = 1;
 
 struct EmbeddingInOut {
-  int N, NS, E, U;
+  int N, NS, E, U, R;
   ITyp *offsets;
   ITyp *indices;
   DTyp *output;
@@ -110,6 +114,38 @@ int zipf_dist(double alpha, int M)
   assert((value >=1) && (value <= M));
 
   return(value);
+}
+
+int find_reuse(EmbeddingInOut *eio)
+{
+
+  int N = eio->N;
+  int NS = eio->NS;
+
+  std::map<int, int> tmpBuf;
+#pragma omp parallel for
+  for(int i = 0; i < N; i++) {
+    int start = eio->offsets[i];
+    int end = eio->offsets[i+1];
+    for (int j = start; j < end; j++) {
+      int temp = eio->indices[j];
+      #pragma omp critical
+      {
+        if (tmpBuf.find(temp) == tmpBuf.end())
+          tmpBuf.insert({temp,1});
+        else
+          tmpBuf[temp]++;
+      }
+    }
+  }
+
+  int R = 0;
+  for (auto iter = tmpBuf.begin(); iter != tmpBuf.end(); iter++)
+  {
+    if (iter->second > 1)
+      R++;
+  }
+  return R;
 }
 
 int find_unique(EmbeddingInOut *eio)
@@ -176,11 +212,11 @@ void allocate_buffers_and_generte_rnd_input(int N, int P, double alpha, Embeddin
   {
     int start = eio->offsets[n];
     int end = eio->offsets[n+1];
-    for (int i = start; i < end; i++)
-    {
-      ITyp ind;
+    std::set<ITyp> s_ind;
+    double randval;
+    ITyp ind;
+    while(s_ind.size() < (end - start)) {
       if (alpha == 0.0) {
-        double randval;
         drand48_r(&rand_buf, &randval);
         ind = (ITyp)(randval * M);
       } else {
@@ -189,12 +225,21 @@ void allocate_buffers_and_generte_rnd_input(int N, int P, double alpha, Embeddin
 
       if (ind == M)
         ind--;
-      eio->indices[i] = ind;
+      s_ind.insert(ind);
     }
-    std::sort(&eio->indices[start], &eio->indices[end]);
+
+    int i = start;
+    for (std::set<ITyp>::iterator itr = s_ind.begin(); itr != s_ind.end(); itr++, i++) {
+        eio->indices[i] = *itr;
+    }
+
+// std::sort(&eio->indices[start], &eio->indices[end]);
   }
 
   eio->U = find_unique(eio);
+#ifndef USE_SNIPER
+  eio->R = find_reuse(eio);
+#endif
 }
 
 void free_buffers(EmbeddingInOut *eio)
@@ -324,6 +369,7 @@ int main(int argc, char * argv[]) {
   DTyp *A2Agsrc, *A2Agdst;
   size_t tNS = 0;
   size_t tU = 0;
+  size_t tR = 0;
 
   A2Asrc = (DTyp*)my_malloc(LS*N*E*sizeof(DTyp), alignment);
   A2Agsrc = (DTyp*)my_malloc(S*LN*E*sizeof(DTyp), alignment);
@@ -356,6 +402,7 @@ int main(int argc, char * argv[]) {
       allocate_buffers_and_generte_rnd_input(N, P, alpha, eb[i], eio[j][i]);
       tNS += eio[j][i]->NS;
       tU += eio[j][i]->U;
+      tR += eio[j][i]->R;
     }
   }
 
@@ -498,7 +545,11 @@ int main(int argc, char * argv[]) {
   size_t updBytes = ((size_t)2*tU*E + (size_t)tNS*E) * sizeof(DTyp) + ((size_t)tNS) * sizeof(ITyp);
 
   my_printf("USE RTM = %d  STREAMING STORES = %d\n", use_rtm, rfo == 1 ? 1 : 0);
+#ifndef USE_SNIPER
+  my_printf("Iters = %d, LS = %d, N = %d, M = %d, E = %d, avgNS = %d, avgU = %d, avgR = %d,P = %d\n", iters, LS, N, M, E, tNS/(iters*LS), tU/(iters*LS), tR/(iters*LS), P);
+#else
   my_printf("Iters = %d, LS = %d, N = %d, M = %d, E = %d, avgNS = %d, avgU = %d, P = %d\n", iters, LS, N, M, E, tNS/(iters*LS), tU/(iters*LS), P);
+#endif
   //printf("Time: Fwd: %.3f ms Bwd: %.3f ms Upd: %.3f  Total: %.3f\n", fwdTime, bwdTime, updTime, t1-t0);
   my_printf("Per Iter  Time: Fwd: %.3f ms Bwd: %.3f ms Upd: %.3f  A2A: %.3f ms Total: %.3f ms\n", fwdTime/(iters), bwdTime/(iters), updTime/(iters), (fwdA2ATime+bwdA2ATime+packTime+unpackTime)/(iters), (t1-t0)/(iters));
   my_printf("Per Table Time: Fwd: %.3f ms Bwd: %.3f ms Upd: %.3f  Total: %.3f ms\n", fwdTime/(iters*LS), bwdTime/(iters*LS), updTime/(iters*LS), (t1-t0)/(iters*LS));
