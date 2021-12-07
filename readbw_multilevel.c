@@ -541,12 +541,10 @@ int main(int argc, char* argv[]) {
     for ( i = 0; i < l_n_oiters; ++i ) {
       for ( j = 0; j < l_n_levels; ++j ) {
         for ( k = 0; k < l_n_iiters; ++k ) {
-
           if (tid > 0) {
             char* my_buffer = l_n_buffers[tid-1][j];
             read_buffer( my_buffer, l_n_bytes);
 	  }
-	//  _mm_mfence();
 #if defined(_OPENMP)
 # pragma omp barrier
 #endif
@@ -558,7 +556,6 @@ int main(int argc, char* argv[]) {
 	        read_buffer_256B(my_buffer);
               }
 	    }
-
             l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 1] = __rdtsc();
 	  }
 #if defined(_OPENMP)
