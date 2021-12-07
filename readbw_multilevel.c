@@ -526,7 +526,7 @@ int main(int argc, char* argv[]) {
 
 
 #if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC) || defined(USE_CORE_PERF_L2IN)
-	       read_core_ctrs( &cc_a );
+    read_core_ctrs( &cc_a );
 #endif
 
 #if defined(_OPENMP)
@@ -554,8 +554,8 @@ int main(int argc, char* argv[]) {
             l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 0] = __rdtsc();
 	    for (size_t offset = 0; offset < l_n_bytes; offset += 256) {
               for (size_t m = 0; m < l_n_workers-1; m++ ) {
-                 char* my_buffer = &l_n_buffers[m][j][offset];
-	         read_buffer_256B(my_buffer);
+                char* my_buffer = &l_n_buffers[m][j][offset];
+	        read_buffer_256B(my_buffer);
               }
 	    }
 
@@ -564,10 +564,10 @@ int main(int argc, char* argv[]) {
 #if defined(_OPENMP)
 # pragma omp barrier
 #endif
-            l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 2] = __rdtsc();
-            for (size_t m = 0; m < l_n_workers-1; m++ ) 
-              clflush_buffer(l_n_buffers[m][j], l_n_bytes);
-            l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 3] = __rdtsc();
+          l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 2] = __rdtsc();
+          for (size_t m = 0; m < l_n_workers-1; m++ ) 
+            clflush_buffer(l_n_buffers[m][j], l_n_bytes);
+          l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 3] = __rdtsc();
 #if defined(_OPENMP)
 # pragma omp barrier
 #endif
@@ -576,9 +576,9 @@ int main(int argc, char* argv[]) {
     }
   }
 #if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC) || defined(USE_CORE_PERF_L2IN)
-	       read_core_ctrs( &cc_b );
-	       difa_core_ctrs( &cc_a, &cc_b, &cc_s );
-	       divi_core_ctrs( &cc_s, 1);
+  read_core_ctrs( &cc_b );
+  difa_core_ctrs( &cc_a, &cc_b, &cc_s );
+  divi_core_ctrs( &cc_s, 1);
 #endif
     /* let's print the stats */
     {
