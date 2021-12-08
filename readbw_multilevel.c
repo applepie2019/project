@@ -27,13 +27,16 @@
 ** SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.              **
 ******************************************************************************/
 
-#if 0 
+#if 0
 #define USE_CORE_PERF_SNP
 #endif
-#if 0 
+#if 0
 #define USE_CORE_PERF_L2IN
 #endif
-#if 0 
+#if 0
+#define USE_CORE_PERF_L3HITS
+#endif
+#if 0
 #define USE_CORE_PERF_IPC
 #endif
 #if 0
@@ -50,6 +53,12 @@
 #endif
 #if 0
 #define USE_UNCORE_PREF_IV_UTIL
+#endif
+#if 0
+#define USE_UNCORE_PREF_CHA_XSNP_RESP
+#endif
+#if 0
+#define USE_UNCORE_PREF_CHA_CORE_SNP
 #endif
 
 #include <stdio.h>
@@ -80,7 +89,7 @@
 #define USE_CLDEMOTE
 #endif
 
-#if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_L2IN) || defined(USE_CORE_PERF_IPC) || defined(USE_UNCORE_PERF_DRAM_BW) || defined(USE_UNCORE_PERF_LLC_VICTIMS) || defined(USE_UNCORE_PERF_CHA_UTIL) || defined(USE_UNCORE_PREF_AK_UTIL) || defined(USE_UNCORE_PREF_IV_UTIL)
+#if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_L2IN) || defined(USE_CORE_PERF_IPC) || defined(USE_UNCORE_PERF_DRAM_BW) || defined(USE_UNCORE_PERF_LLC_VICTIMS) || defined(USE_UNCORE_PERF_CHA_UTIL) || defined(USE_UNCORE_PREF_AK_UTIL) || defined(USE_UNCORE_PREF_IV_UTIL) || defined(USE_UNCORE_PREF_CHA_XSNP_RESP) || defined(USE_UNCORE_PREF_CHA_CORE_SNP) || defined(USE_CORE_PERF_L3HITS)
 #  include "../common/perf_counter_markers.h"
 #endif
 
@@ -185,6 +194,28 @@ void read_buffer( char* i_buffer, size_t i_length ) {
 #endif
 }
 
+void read_buffer_128B_odd( char* i_buffer) {
+#ifdef __AVX512F__
+  __asm__ __volatile__("movq %0, %%r8\n\t"
+                       "vmovapd     0(%%r8),   %%zmm0\n\t"
+                       "vmovapd    64(%%r8),   %%zmm1\n\t"
+                       : : "m"(i_buffer) : "r8","zmm0","zmm1");
+#else
+#error need at least SSE2
+#endif
+}
+
+void read_buffer_128B_even( char* i_buffer) {
+#ifdef __AVX512F__
+  __asm__ __volatile__("movq %0, %%r9\n\t"
+                       "vmovapd     0(%%r9),   %%zmm2\n\t"
+                       "vmovapd    64(%%r9),   %%zmm3\n\t"
+                       : : "m"(i_buffer) : "r9","zmm2","zmm3");
+#else
+#error need at least SSE2
+#endif
+}
+
 void read_buffer_256B( char* i_buffer) {
 #ifdef __AVX512F__
   __asm__ __volatile__("movq %0, %%r8\n\t"
@@ -192,7 +223,7 @@ void read_buffer_256B( char* i_buffer) {
                        "vmovapd    64(%%r8),   %%zmm1\n\t"
                        "vmovapd   128(%%r8),   %%zmm2\n\t"
                        "vmovapd   192(%%r8),   %%zmm3\n\t"
-                       : : "m"(i_buffer) : "r8","xmm0","xmm1","xmm2","xmm3");
+                       : : "m"(i_buffer) : "r8","zmm0","zmm1","zmm2","zmm3");
 #else
 #error need at least SSE2
 #endif
@@ -388,7 +419,7 @@ int main(int argc, char* argv[]) {
   double l_totalGiB, l_totalGiB_dram;
   size_t i, j, k;
 
-#if defined(USE_CORE_PERF_L2IN) || defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC)
+#if defined(USE_CORE_PERF_L2IN) || defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC) || defined(USE_CORE_PERF_L3HITS)
   ctrs_core cc_a, cc_b, cc_s;
   zero_core_ctrs( &cc_a );
   zero_core_ctrs( &cc_b );
@@ -397,6 +428,9 @@ int main(int argc, char* argv[]) {
 #if defined(USE_CORE_PERF_L2IN)
   setup_core_ctrs(CTRS_EXP_L2_BW);
 #endif
+#if defined(USE_CORE_PERF_L3HITS)
+  setup_core_ctrs(CTRS_EXP_L3_BW);
+#endif
 #if defined(USE_CORE_PERF_SNP)
   setup_core_ctrs(CTRS_EXP_CORE_SNP_RSP);
 #endif
@@ -404,7 +438,7 @@ int main(int argc, char* argv[]) {
   setup_core_ctrs(CTRS_EXP_IPC);
 #endif
 #endif
-#if defined(USE_UNCORE_PERF_DRAM_BW) || defined(USE_UNCORE_PERF_LLC_VICTIMS) || defined(USE_UNCORE_PERF_CHA_UTIL) || defined(USE_UNCORE_PREF_AK_UTIL) || defined(USE_UNCORE_PREF_IV_UTIL)
+#if defined(USE_UNCORE_PERF_DRAM_BW) || defined(USE_UNCORE_PERF_LLC_VICTIMS) || defined(USE_UNCORE_PERF_CHA_UTIL) || defined(USE_UNCORE_PREF_AK_UTIL) || defined(USE_UNCORE_PREF_IV_UTIL)  || defined(USE_UNCORE_PREF_CHA_XSNP_RESP) || defined(USE_UNCORE_PREF_CHA_CORE_SNP) || defined(USE_CORE_PERF_L3HITS)
   ctrs_uncore uc_a, uc_b, uc_s;
   zero_uncore_ctrs( &uc_a );
   zero_uncore_ctrs( &uc_b );
@@ -424,6 +458,12 @@ int main(int argc, char* argv[]) {
 #endif
 #if defined(USE_UNCORE_PREF_IV_UTIL)
   setup_uncore_ctrs( CTRS_EXP_CMS_IV );
+#endif
+#if defined(USE_UNCORE_PREF_CHA_XSNP_RESP)
+  setup_uncore_ctrs(CTRS_EXP_CHA_XSNP_RESP);
+#endif
+#if defined(USE_UNCORE_PREF_CHA_CORE_SNP)
+  setup_uncore_ctrs(CTRS_EXP_CHA_CORE_SNP);
 #endif
 #endif
 
@@ -453,7 +493,7 @@ int main(int argc, char* argv[]) {
     printf("num of workers must be > 1\n");
     return -1;
   }
-#if 0  
+#if 0
   if ( (l_n_bytes/2048) % (l_n_workers-1) !=0 ) {
     printf("the size of each partition needs to be a multipe of num_workers-1. ABORT!\n");
     return -1;
@@ -525,8 +565,12 @@ int main(int argc, char* argv[]) {
     memset( (void*)l_tsc_timer, 0, l_n_workers*l_n_levels*l_n_oiters*8*sizeof(size_t) );
 
 
-#if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC) || defined(USE_CORE_PERF_L2IN)
+#if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC) || defined(USE_CORE_PERF_L2IN) || defined(USE_CORE_PERF_L3HITS)
     read_core_ctrs( &cc_a );
+#endif
+
+#if defined(USE_UNCORE_PERF_DRAM_BW) || defined(USE_UNCORE_PERF_LLC_VICTIMS) || defined(USE_UNCORE_PERF_CHA_UTIL) || defined(USE_UNCORE_PREF_AK_UTIL) || defined(USE_UNCORE_PREF_IV_UTIL) || defined(USE_UNCORE_PREF_CHA_XSNP_RESP) || defined(USE_UNCORE_PREF_CHA_CORE_SNP)
+  read_uncore_ctrs( &uc_a );
 #endif
 
 #if defined(_OPENMP)
@@ -549,22 +593,50 @@ int main(int argc, char* argv[]) {
 # pragma omp barrier
 #endif
 	  if (tid == 0) {
+	    uint64_t counter = 0;
             l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 0] = __rdtsc();
-	    for (size_t offset = 0; offset < l_n_bytes; offset += 256) {
+	    for (size_t offset = 0; offset < l_n_bytes; offset += 128) {
               for (size_t m = 0; m < l_n_workers-1; m++ ) {
                 char* my_buffer = &l_n_buffers[m][j][offset];
+#if 1
+		if (counter & 1) {
+#ifdef __AVX512F__
+                __asm__ __volatile__("movq %0, %%r8\n\t"
+                       "vmovapd     0(%%r8),   %%zmm0\n\t"
+                       "vmovapd    64(%%r8),   %%zmm1\n\t"
+		       ::"m"(my_buffer) : "r8","zmm0","zmm1");
+#else
+#error need at least SSE2
+#endif
+		} else {
+#ifdef __AVX512F__
+                __asm__ __volatile__("movq %0, %%r9\n\t"
+                       "vmovapd     0(%%r9),   %%zmm2\n\t"
+                       "vmovapd    64(%%r9),   %%zmm3\n\t"
+		       ::"m"(my_buffer) : "r9","zmm2","zmm3");
+#else
+#error need at least SSE2
+#endif
+	        }
+		counter++;
+#endif
+
+#if 0
 	        read_buffer_256B(my_buffer);
+#endif
               }
 	    }
             l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 1] = __rdtsc();
 	  }
+#if 1
 #if defined(_OPENMP)
 # pragma omp barrier
 #endif
           l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 2] = __rdtsc();
-          for (size_t m = 0; m < l_n_workers-1; m++ ) 
+          for (size_t m = 0; m < l_n_workers-1; m++ )
             clflush_buffer(l_n_buffers[m][j], l_n_bytes);
           l_tsc_timer[(tid*l_n_levels*l_n_oiters*8) + (j*l_n_oiters*8) + (i*8) + 3] = __rdtsc();
+#endif
 #if defined(_OPENMP)
 # pragma omp barrier
 #endif
@@ -572,10 +644,15 @@ int main(int argc, char* argv[]) {
       }
     }
   }
-#if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC) || defined(USE_CORE_PERF_L2IN)
+#if defined(USE_CORE_PERF_SNP) || defined(USE_CORE_PERF_IPC) || defined(USE_CORE_PERF_L2IN) || defined(USE_CORE_PERF_L3HITS)
   read_core_ctrs( &cc_b );
   difa_core_ctrs( &cc_a, &cc_b, &cc_s );
   divi_core_ctrs( &cc_s, 1);
+#endif
+#if defined(USE_UNCORE_PERF_DRAM_BW) || defined(USE_UNCORE_PERF_LLC_VICTIMS) || defined(USE_UNCORE_PERF_CHA_UTIL) || defined(USE_UNCORE_PREF_AK_UTIL) || defined(USE_UNCORE_PREF_IV_UTIL) || defined(USE_UNCORE_PREF_CHA_XSNP_RESP) || defined(USE_UNCORE_PREF_CHA_CORE_SNP)
+  read_uncore_ctrs( &uc_b );
+  difa_uncore_ctrs( &uc_a, &uc_b, &uc_s );
+  divi_uncore_ctrs( &uc_s, 1 );
 #endif
     /* let's print the stats */
     {
@@ -671,6 +748,30 @@ int main(int argc, char* argv[]) {
       for ( int core = 0; core < CTRS_NCORE; ++core )
         printf("core %d, #l2_lines %lld \n", core,  cc_s.l2_lines_in[core]);
     }
+#endif
+#if defined(USE_UNCORE_PREF_CHA_XSNP_RESP)
+  {
+    int cha = 0;
+    for ( cha = 0; cha < CTRS_NCHA; ++cha ) {
+      printf("CHA %i: CMS cyc: %lld, xsnp_resp: %lld \n", cha, uc_s.cms_clockticks[cha], uc_s.xsnp_resp[cha]);
+    }
+  }
+#endif
+#if defined(USE_UNCORE_PREF_CHA_CORE_SNP)
+  {
+    int cha = 0;
+    for ( cha = 0; cha < CTRS_NCHA; ++cha ) {
+      printf("CHA %i: CMS cyc: %lld, core_snp: %lld \n", cha, uc_s.cms_clockticks[cha], uc_s.core_snp[cha]);
+    }
+  }
+#endif
+#if defined(USE_CORE_PERF_L3HITS)
+  {
+    for ( int core = 0; core < CTRS_NCORE; ++core ) {
+      printf("core %d, #l3_hits %lld \n", core,  cc_s.l3_hits_xsnp_none[core]);
+      printf("core %d, #l3_hits_snoop %lld \n", core,  cc_s.l3_hits_xsnp_hits[core]);
+    }
+  }
 #endif
     free( l_tsc_timer );
   }
